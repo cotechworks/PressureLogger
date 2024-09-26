@@ -3,11 +3,15 @@
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 #include <Adafruit_BMP280.h>
+#include <WiFiClientSecure.h>
 
 // Wi-Fi
 const char *SSID = "AutoConnectAP";
 const char *PASS = "password";
 const char *GOOGLE_URL = "https://script.google.com/macros/s/AKfycbyssorHTLP7UH4iY-f-GVSHPlCbRK-Z7Ne3_Z9Pfg0BXB3fi6PKcUFhlmHHib2SV7pNgA/exec";
+
+const String host = "script.google.com";   // ホスト
+const String url = "/macros/s/AKfycbyssorHTLP7UH4iY-f-GVSHPlCbRK-Z7Ne3_Z9Pfg0BXB3fi6PKcUFhlmHHib2SV7pNgA/exec";  // URL後半部分
 
 // BMP280
 Adafruit_BMP280 bmp;
@@ -27,7 +31,7 @@ void setup()
   digitalWrite(LED_BUILTIN, HIGH);
 
   // BMP280初期化
-  bool status = bmp.begin(BMP280_ADDRESS_ALT, BMP280_CHIPID);
+  bmp.begin(BMP280_ADDRESS_ALT, BMP280_CHIPID);
   bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,
                   Adafruit_BMP280::SAMPLING_X2,
                   Adafruit_BMP280::SAMPLING_X16,
@@ -54,39 +58,30 @@ void setup()
 
 void loop()
 {
-  // 環境データ測定
-  float temp = bmp.readTemperature();
-  float press = bmp.readPressure() / 100;
-  Serial.println("気温= " + String(temp) + "*C / 気圧= " + String(press) + "hPa");
-
-  // HTTPリクエスト
-  WiFiClient client;
-  HTTPClient http;
-  char url[200];
-  char temp_s[10];
-  char press_s[10];
-  dtostrf(temp, 4, 2, temp_s);
-  dtostrf(press, 6, 2, press_s);
-  sprintf(url, "%s?temperature=%s&pressure=%s", GOOGLE_URL, temp_s, press_s);
-  Serial.print("URL: ");
-  Serial.println(url);
-
-  String url_s = "https://script.google.com/macros/s/AKfycbyssorHTLP7UH4iY-f-GVSHPlCbRK-Z7Ne3_Z9Pfg0BXB3fi6PKcUFhlmHHib2SV7pNgA/exec?temperature=28.03&pressure=1011.40";
-  if (http.begin(client, url_s))
-  {
-    // リクエスト送信結果の確認
-    int httpCode = http.GET();
-    Serial.println("[HTTP] Status Code: " + String(httpCode));
-    if (httpCode > 0)
-    {
-      String payload = http.getString();
-      Serial.println("[HTTP] Payload: " + payload);
-    }
-    http.end();
-  }
-  else
-  {
-    Serial.println("[HTTP] Unable to connect");
+  // POSTメッセージ作成
+  String params;
+  params = "temperature=" + String(bmp.readTemperature());
+  params += "&pressure=" + String(bmp.readPressure() / 100);
+  Serial.println(params);
+  
+  // SSL接続開始、POSTメッセージ送信
+  WiFiClientSecure sslclient;
+  if (sslclient.connect(host, 443) > 0) {
+    sslclient.println("POST " + url + " HTTP/1.1");
+    sslclient.println("Host: " + host);
+    sslclient.println("User-Agent: ESP8266/1.0");
+    sslclient.println("Connection: close");
+    sslclient.println("Content-Type: application/x-www-form-urlencoded;");
+    sslclient.print("Content-Length: ");
+    sslclient.println(params.length());
+    sslclient.println();
+    sslclient.println(params);
+    delay(10);
+    String response = sslclient.readString();
+    int bodypos =  response.indexOf("\r\n");
+  } else {
+    // HTTP client errors
+    Serial.println("[HTTPS] no connection or no HTTP server.");
   }
 
   // 待機
