@@ -1,20 +1,48 @@
 #include <Arduino.h>
 #include <WiFiManager.h>
-#include <ESP8266HTTPClient.h>
-#include <WiFiClient.h>
 #include <Adafruit_BMP280.h>
 #include <WiFiClientSecure.h>
 
 // Wi-Fi
 const char *SSID = "AutoConnectAP";
 const char *PASS = "password";
-const char *GOOGLE_URL = "https://script.google.com/macros/s/AKfycbyssorHTLP7UH4iY-f-GVSHPlCbRK-Z7Ne3_Z9Pfg0BXB3fi6PKcUFhlmHHib2SV7pNgA/exec";
+const String GOOGLE_URL = "https://script.google.com/macros/s/AKfycbyssorHTLP7UH4iY-f-GVSHPlCbRK-Z7Ne3_Z9Pfg0BXB3fi6PKcUFhlmHHib2SV7pNgA/exec";
 
 const String host = "script.google.com";   // ホスト
 const String url = "/macros/s/AKfycbyssorHTLP7UH4iY-f-GVSHPlCbRK-Z7Ne3_Z9Pfg0BXB3fi6PKcUFhlmHHib2SV7pNgA/exec";  // URL後半部分
 
 // BMP280
 Adafruit_BMP280 bmp;
+
+bool Https_Get_access(String host, String url, String argument){
+    BearSSL::WiFiClientSecure client;
+    client.setTimeout(500);
+    client.setInsecure();
+
+    const int httpPort = 443;
+    const char* host2 = host.c_str();
+    if (!client.connect(host2, httpPort)) {
+        Serial.println("connection failed");
+        return false;
+    }
+    client.print(String("GET ") + url + "?" + argument + " HTTP/1.1\r\n" +
+                        "Host: " + host + "\r\n" + 
+                        "User-Agent: ESP8266/1.0\r\n" + 
+                        "Connection: close\r\n\r\n");
+    unsigned long timeout = micros();
+    while (client.available() == 0) {
+        if ( micros() - timeout  > 5000000) {
+            Serial.println(">>> Client Timeout !");
+            client.stop();
+            return false;
+        }
+    }
+    while(client.available()){
+        String line = client.readStringUntil('\r');
+        Serial.print(line);
+    }
+    return true;
+}
 
 void setup()
 {
@@ -58,33 +86,20 @@ void setup()
 
 void loop()
 {
-  // POSTメッセージ作成
+  // 環境データ測定
+  float temp = bmp.readTemperature();
+  float press = bmp.readPressure() / 100;
+
+  // URL作成
   String params;
-  params = "temperature=" + String(bmp.readTemperature());
-  params += "&pressure=" + String(bmp.readPressure() / 100);
+  params += "temperature=" + String(temp);
+  params += "&pressure=" + String(press);
   Serial.println(params);
-  
-  // SSL接続開始、POSTメッセージ送信
-  WiFiClientSecure sslclient;
-  if (sslclient.connect(host, 443) > 0) {
-    sslclient.println("POST " + url + " HTTP/1.1");
-    sslclient.println("Host: " + host);
-    sslclient.println("User-Agent: ESP8266/1.0");
-    sslclient.println("Connection: close");
-    sslclient.println("Content-Type: application/x-www-form-urlencoded;");
-    sslclient.print("Content-Length: ");
-    sslclient.println(params.length());
-    sslclient.println();
-    sslclient.println(params);
-    delay(10);
-    String response = sslclient.readString();
-    int bodypos =  response.indexOf("\r\n");
-  } else {
-    // HTTP client errors
-    Serial.println("[HTTPS] no connection or no HTTP server.");
-  }
+
+  //POST
+  Https_Get_access( host, url, params);
 
   // 待機
   Serial.println();
-  delay(10000);
+  delay(60000);
 }
